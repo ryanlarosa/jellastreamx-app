@@ -1,8 +1,9 @@
 {
   "expo": {
-    "name": "StreamingApp",
-    "slug": "StreamingApp",
-    "version": "1.0.0",
+    "name": "JellaStreamX",
+    "slug": "JellaStreamX",
+    "scheme": "jellastreamx",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -16,14 +17,34 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.jella.jellastreamx",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "https",
+              "host": "jellastreamx-c9b7f.firebaseapp.com"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ],
       "edgeToEdgeEnabled": true
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "45341e5e-b0cb-4fc4-b225-03ea84663c0e"
+      }
+    },
+    "plugins": ["expo-secure-store"]
   }
 }
