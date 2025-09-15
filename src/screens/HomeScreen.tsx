@@ -17,16 +17,27 @@ import {
 import { useAuth } from "../context/AuthContext";
 import VideoCarousel from "../components/VideoCarousel";
 import CarouselSkeleton from "../components/CarouselSkeleton";
+import { Movie, TVShow } from "../types/api";
+
+// Define a type for our media state for clarity
+interface MediaState {
+  trendingMovies: Movie[];
+  trendingTvShows: TVShow[];
+  popularMovies: Movie[];
+  popularAnime: TVShow[];
+}
 
 export default function HomeScreen() {
   const { user } = useAuth();
   const isFocused = useIsFocused();
-  const [media, setMedia] = useState({
+
+  const [media, setMedia] = useState<MediaState>({
     trendingMovies: [],
     trendingTvShows: [],
     popularMovies: [],
     popularAnime: [],
   });
+
   const [watchHistory, setWatchHistory] = useState<WatchHistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -35,7 +46,9 @@ export default function HomeScreen() {
     const fetchAllMedia = async () => {
       setLoading(true);
       try {
-        const promises = [
+        // --- START OF FIX #2 ---
+        // 3. Define the promises array with a broad type to allow different kinds of promises
+        const promises: Promise<any>[] = [
           getTrendingMovies(),
           getPopularMovies(),
           getTrendingTvShows(),
@@ -45,13 +58,15 @@ export default function HomeScreen() {
           promises.push(getWatchHistory(user.uid));
         }
         const results = await Promise.all(promises);
+        // 4. Safely assign the results using their index
         setMedia({
-          trendingMovies: results[0],
-          popularMovies: results[1],
-          trendingTvShows: results[2],
-          popularAnime: results[3],
+          trendingMovies: results[0] || [],
+          popularMovies: results[1] || [],
+          trendingTvShows: results[2] || [],
+          popularAnime: results[3] || [],
         });
         if (user && user !== "guest") {
+          // The watch history is the 5th item (index 4)
           setWatchHistory(results[4] || []);
         } else {
           setWatchHistory([]);
