@@ -17,13 +17,27 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 // Define the shape of a watchlist item for type safety
+// --- START OF FIX ---
+// Updated the interfaces to allow poster_path to be null, matching our API data
 export interface WatchlistItem {
   id: number;
   media_type: "movie" | "tv";
   title?: string;
   name?: string;
-  poster_path: string;
+  poster_path: string | null;
 }
+
+export interface WatchHistoryItem {
+  id: number;
+  media_type: "movie" | "tv";
+  title?: string;
+  name?: string;
+  poster_path: string | null;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  lastWatchedAt: number;
+}
+// --- END OF FIX ---
 
 // Function to add a media item to a user's watchlist
 export const addToWatchlist = async (
@@ -83,18 +97,6 @@ export const isMediaInWatchlist = async (
   return watchlist.some((item) => item.id === mediaId);
 };
 
-// --- START OF NEW CODE ---
-// Define the shape of a watch history item
-export interface WatchHistoryItem {
-  id: number;
-  media_type: "movie" | "tv"; // Now accepts 'movie'
-  title?: string;
-  name?: string;
-  poster_path: string;
-  seasonNumber?: number; // Optional
-  episodeNumber?: number; // Optional
-  lastWatchedAt: number;
-}
 // --- START OF FIX ---
 
 // Function to save or update a user's watch progress for a specific show

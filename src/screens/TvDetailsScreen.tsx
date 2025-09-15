@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   Alert,
+  Image,
 } from "react-native";
 import {
   useNavigation,
@@ -15,7 +16,6 @@ import {
   useIsFocused,
 } from "@react-navigation/native";
 import { getTvShowDetails, getCredits } from "../api/tmdb";
-import { servers, getTvStreamUrl } from "../api/vidsrc";
 import {
   addToWatchlist,
   removeFromWatchlist,
@@ -25,14 +25,19 @@ import {
   WatchHistoryItem,
   getShowWatchHistory,
 } from "../api/firestore";
+import { resolveStreams, StreamSource } from "../api/streamResolver";
 import { useAuth } from "../context/AuthContext";
 import { AppNavigationProp, RootStackParamList } from "../navigation/types";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import ServerSelectionModal from "../components/ServerSelectionModal";
+import StreamSelectionModal from "../components/StreamSelectionModal"; // Corrected from ServerSelectionModal
 import MediaDetailsLayout from "../components/MediaDetailsLayout";
+import { TVShow } from "../types/api";
 
 type TvDetailsScreenRouteProp = RouteProp<RootStackParamList, "TvDetails">;
-type Props = { route: TvDetailsScreenRouteProp };
+
+type Props = {
+  route: TvDetailsScreenRouteProp;
+};
 
 export default function TvDetailsScreen({ route }: Props) {
   const { tvId } = route.params;
@@ -40,7 +45,7 @@ export default function TvDetailsScreen({ route }: Props) {
   const { user } = useAuth();
   const isFocused = useIsFocused();
 
-  const [tvShow, setTvShow] = useState<any>(null);
+  const [tvShow, setTvShow] = useState<TVShow | null>(null);
   const [cast, setCast] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isInWatchlist, setIsInWatchlist] = useState(false);
@@ -48,13 +53,15 @@ export default function TvDetailsScreen({ route }: Props) {
     number | null
   >(null);
   const [lastWatched, setLastWatched] = useState<WatchHistoryItem | null>(null);
-  const [isServerModalVisible, setIsServerModalVisible] = useState(false);
-  const [selectedEpisode, setSelectedEpisode] = useState<number | null>(null);
+
+  // State for the new resolver flow
+  const [resolvingEpisode, setResolvingEpisode] = useState<number | null>(null);
+  const [streams, setStreams] = useState<StreamSource[]>([]);
+  const [isStreamModalVisible, setIsStreamModalVisible] = useState(false);
 
   useEffect(() => {
     const fetchAllData = async () => {
       setLoading(true);
-
       const [details, castData] = await Promise.all([
         getTvShowDetails(tvId),
         getCredits("tv", tvId),
@@ -105,13 +112,36 @@ export default function TvDetailsScreen({ route }: Props) {
     (season: any) => season.season_number === selectedSeasonNumber
   );
 
-  const handlePlayEpisode = (episodeNumber: number) => {
-    setSelectedEpisode(episodeNumber);
-    setIsServerModalVisible(true);
+  const handleResolveEpisode = async (episodeNumber: number) => {
+    if (!tvShow || !selectedSeason) return;
+    setResolvingEpisode(episodeNumber); // Store the selected episode
+
+    const releaseYear = tvShow.first_air_date
+      ? parseInt(tvShow.first_air_date.substring(0, 4))
+      : undefined;
+    const resolvedStreams = await resolveStreams(
+      tvShow.name,
+      releaseYear,
+      selectedSeason.season_number,
+      episodeNumber
+    );
+
+    setStreams(resolvedStreams);
+    setResolvingEpisode(null); // Stop the spinner
+
+    if (resolvedStreams.length > 0) {
+      setIsStreamModalVisible(true);
+    } else {
+      Alert.alert(
+        "No Streams Found",
+        "Sorry, we couldn't find any playable streams for this episode."
+      );
+    }
   };
 
-  const handleServerSelection = (server: { getUrl: Function }) => {
-    if (tvShow && selectedSeason && selectedEpisode) {
+  const handleSelectStream = (stream: StreamSource) => {
+    // We use the episode number we saved in state before opening the modal
+    if (tvShow && selectedSeason && resolvingEpisode) {
       if (user && user !== "guest") {
         const historyItem: WatchHistoryItem = {
           id: tvShow.id,
@@ -119,19 +149,13 @@ export default function TvDetailsScreen({ route }: Props) {
           name: tvShow.name,
           poster_path: tvShow.poster_path,
           seasonNumber: selectedSeason.season_number,
-          episodeNumber: selectedEpisode,
+          episodeNumber: resolvingEpisode,
           lastWatchedAt: Date.now(),
         };
         updateWatchHistory(user.uid, historyItem);
       }
-      const streamUrl = getTvStreamUrl(
-        tvShow.id,
-        selectedSeason.season_number,
-        selectedEpisode,
-        server
-      );
-      const title = `${tvShow.name} - S${selectedSeason.season_number} E${selectedEpisode}`;
-      navigation.navigate("Player", { streamUrl, title });
+      const title = `${tvShow.name} - S${selectedSeason.season_number} E${resolvingEpisode}`;
+      navigation.navigate("Player", { streamUrl: stream.url, title });
     }
   };
 
@@ -154,17 +178,17 @@ export default function TvDetailsScreen({ route }: Props) {
     try {
       if (isInWatchlist) {
         await removeFromWatchlist(user.uid, mediaItem);
-        setIsInWatchlist(false);
+        setIsInWatchlist(false); // Update the button state
       } else {
         await addToWatchlist(user.uid, mediaItem);
-        setIsInWatchlist(true);
+        setIsInWatchlist(true); // Update the button state
       }
     } catch (error) {
       console.error("Error toggling watchlist:", error);
       Alert.alert("Error", "Could not update your watchlist.");
     }
   };
-
+  // --- END OF FIX ---
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -180,6 +204,7 @@ export default function TvDetailsScreen({ route }: Props) {
       </SafeAreaView>
     );
   }
+
   return (
     <>
       <MediaDetailsLayout
@@ -201,7 +226,6 @@ export default function TvDetailsScreen({ route }: Props) {
           </View>
         }
       >
-        {/* The unique Seasons and Episodes section is passed as children */}
         <View style={styles.seasonsContainer}>
           <Text style={styles.sectionTitle}>Seasons</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -236,6 +260,7 @@ export default function TvDetailsScreen({ route }: Props) {
                 lastWatched &&
                 lastWatched.seasonNumber === selectedSeason.season_number &&
                 lastWatched.episodeNumber === episodeNum;
+              const isResolvingThis = resolvingEpisode === episodeNum;
               return (
                 <TouchableOpacity
                   key={episodeNum}
@@ -243,7 +268,8 @@ export default function TvDetailsScreen({ route }: Props) {
                     styles.episodeContainer,
                     isLastWatched && styles.lastWatchedEpisode,
                   ]}
-                  onPress={() => handlePlayEpisode(episodeNum)}
+                  onPress={() => handleResolveEpisode(episodeNum)}
+                  disabled={isResolvingThis}
                 >
                   <View style={{ flexDirection: "row", alignItems: "center" }}>
                     {isLastWatched && (
@@ -256,28 +282,31 @@ export default function TvDetailsScreen({ route }: Props) {
                     )}
                     <Text style={styles.episodeText}>Episode {episodeNum}</Text>
                   </View>
-                  <Ionicons
-                    name="play-circle-outline"
-                    size={28}
-                    color="white"
-                  />
+                  {isResolvingThis ? (
+                    <ActivityIndicator color="white" size="small" />
+                  ) : (
+                    <Ionicons
+                      name="play-circle-outline"
+                      size={28}
+                      color="white"
+                    />
+                  )}
                 </TouchableOpacity>
               );
             })}
         </View>
       </MediaDetailsLayout>
 
-      <ServerSelectionModal
-        isVisible={isServerModalVisible}
-        servers={servers}
-        onClose={() => setIsServerModalVisible(false)}
-        onSelectServer={handleServerSelection}
+      <StreamSelectionModal
+        isVisible={isStreamModalVisible}
+        streams={streams}
+        onClose={() => setIsStreamModalVisible(false)}
+        onSelectStream={handleSelectStream}
       />
     </>
   );
 }
 
-// Styles for only the unique elements of this screen
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
@@ -291,7 +320,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   errorText: { color: "white", fontSize: 16 },
-  actionButtonsContainer: { flexDirection: "row", alignItems: "center" },
+  actionButtonsContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
   myListButton: {
     flexDirection: "column",
     alignItems: "center",

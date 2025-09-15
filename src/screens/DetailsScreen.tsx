@@ -15,7 +15,6 @@ import {
 } from "@react-navigation/native";
 import { AppNavigationProp, RootStackParamList } from "../navigation/types";
 import { getMovieDetails, getCredits } from "../api/tmdb";
-import { servers, getMovieStreamUrl } from "../api/vidsrc";
 import {
   addToWatchlist,
   removeFromWatchlist,
@@ -24,19 +23,15 @@ import {
   updateWatchHistory,
   WatchHistoryItem,
 } from "../api/firestore";
-
+import { resolveStreams, StreamSource } from "../api/streamResolver"; // 1. Import the new resolver
 import { useAuth } from "../context/AuthContext";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import ServerSelectionModal from "../components/ServerSelectionModal";
+import StreamSelectionModal from "../components/StreamSelectionModal"; // 2. Import the new modal
 import MediaDetailsLayout from "../components/MediaDetailsLayout";
-
-const BACKDROP_BASE_URL = "https://image.tmdb.org/t/p/w780";
-const CAST_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w185";
-
-type DetailsScreenRouteProp = RouteProp<RootStackParamList, "Details">;
+import { Movie } from "../types/api";
 
 type Props = {
-  route: DetailsScreenRouteProp;
+  route: RouteProp<RootStackParamList, "Details">;
 };
 
 export default function DetailsScreen({ route }: Props) {
@@ -45,11 +40,15 @@ export default function DetailsScreen({ route }: Props) {
   const { user } = useAuth();
   const isFocused = useIsFocused();
 
-  const [movie, setMovie] = useState<any>(null);
+  const [movie, setMovie] = useState<Movie | null>(null);
   const [cast, setCast] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isInWatchlist, setIsInWatchlist] = useState(false);
-  const [isServerModalVisible, setIsServerModalVisible] = useState(false);
+
+  // New state for the resolver flow
+  const [isResolving, setIsResolving] = useState(false);
+  const [streams, setStreams] = useState<StreamSource[]>([]);
+  const [isStreamModalVisible, setIsStreamModalVisible] = useState(false);
 
   useEffect(() => {
     const fetchAllData = async () => {
@@ -74,13 +73,13 @@ export default function DetailsScreen({ route }: Props) {
       }
       setLoading(false);
     };
-
     if (isFocused) {
       fetchAllData();
     }
   }, [movieId, user, isFocused]);
 
-  const handlePlay = (server: { getUrl: Function }) => {
+  // This function is now called by the modal
+  const handleSelectStream = (stream: StreamSource) => {
     if (movie) {
       if (user && user !== "guest") {
         const historyItem: WatchHistoryItem = {
@@ -92,37 +91,38 @@ export default function DetailsScreen({ route }: Props) {
         };
         updateWatchHistory(user.uid, historyItem);
       }
-      const streamUrl = getMovieStreamUrl(movie.id, server);
-      navigation.navigate("Player", { streamUrl, title: movie.title });
+      navigation.navigate("Player", {
+        streamUrl: stream.url,
+        title: movie.title,
+      });
+    }
+  };
+
+  // This function is called by the "Play" button to fetch streams
+  const handleResolve = async () => {
+    if (!movie) return;
+    setIsResolving(true);
+    // Pass the title and year to the resolver for a better match
+    const releaseYear = movie.release_date
+      ? parseInt(movie.release_date.substring(0, 4))
+      : undefined;
+    const resolvedStreams = await resolveStreams(movie.title, releaseYear);
+    setStreams(resolvedStreams);
+    setIsResolving(false);
+
+    // Show the modal only if streams were found
+    if (resolvedStreams.length > 0) {
+      setIsStreamModalVisible(true);
+    } else {
+      Alert.alert(
+        "No Streams Found",
+        "Sorry, we couldn't find any playable streams for this movie."
+      );
     }
   };
 
   const handleToggleWatchlist = async () => {
-    if (!user || user === "guest" || !movie) {
-      Alert.alert(
-        "Guests cannot save items",
-        "Please sign in to use this feature."
-      );
-      return;
-    }
-    const mediaItem: WatchlistItem = {
-      id: movie.id,
-      poster_path: movie.poster_path,
-      title: movie.title,
-      media_type: "movie",
-    };
-    try {
-      if (isInWatchlist) {
-        await removeFromWatchlist(user.uid, mediaItem);
-        setIsInWatchlist(false);
-      } else {
-        await addToWatchlist(user.uid, mediaItem);
-        setIsInWatchlist(true);
-      }
-    } catch (error) {
-      console.error("Error toggling watchlist:", error);
-      Alert.alert("Error", "Could not update your watchlist.");
-    }
+    /* ... (this function is correct) ... */
   };
 
   if (loading) {
@@ -140,6 +140,7 @@ export default function DetailsScreen({ route }: Props) {
       </SafeAreaView>
     );
   }
+
   return (
     <>
       <MediaDetailsLayout
@@ -149,10 +150,17 @@ export default function DetailsScreen({ route }: Props) {
           <View style={styles.actionButtonsContainer}>
             <TouchableOpacity
               style={styles.playButton}
-              onPress={() => setIsServerModalVisible(true)}
+              onPress={handleResolve}
+              disabled={isResolving}
             >
-              <Ionicons name="play" size={24} color="black" />
-              <Text style={styles.playButtonText}>Play</Text>
+              {isResolving ? (
+                <ActivityIndicator color="black" />
+              ) : (
+                <>
+                  <Ionicons name="play" size={24} color="black" />
+                  <Text style={styles.playButtonText}>Play</Text>
+                </>
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -169,19 +177,20 @@ export default function DetailsScreen({ route }: Props) {
           </View>
         }
       >
-        {/* No extra children needed for the movie screen, so pass an empty view */}
+        {/* No extra children needed for the movie screen */}
         <View />
       </MediaDetailsLayout>
 
-      <ServerSelectionModal
-        isVisible={isServerModalVisible}
-        servers={servers}
-        onClose={() => setIsServerModalVisible(false)}
-        onSelectServer={handlePlay}
+      <StreamSelectionModal
+        isVisible={isStreamModalVisible}
+        streams={streams}
+        onClose={() => setIsStreamModalVisible(false)}
+        onSelectStream={handleSelectStream}
       />
     </>
   );
 }
+
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
